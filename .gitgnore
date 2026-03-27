@@ -1,0 +1,9 @@
+# Arquivos de dados do simulador
+*.json
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+
+.vscode/
