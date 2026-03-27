@@ -1,5 +1,6 @@
 #for statistical purposes, asures that the door is open 5% of the time, and closed 95% of the time.
 import random 
+import os
 #used for persistency of data 
 import json
 #used for creating a log file with the date and time of the events, and the state of the cat and the door.
@@ -11,6 +12,18 @@ import socket
 HOST = "127.0.0.1"
 PORT_SENSOR = 1001 
 sensor_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+CATS_FILE = os.path.join(os.path.dirname(__file__), "..", "interface", "cats.json")
+
+
+def get_cat_name():
+    try:
+        with open(CATS_FILE, "r", encoding="utf-8") as f:
+            cats = json.load(f)
+            if cats:
+                return random.choice(list(cats.keys()))
+    except Exception:
+        pass
+    return ""
 
 # Bed state: True = sleeping, False = waken
 open_bed = True
@@ -22,7 +35,7 @@ cat_state = False
 #frequently, and, in advance, the author can controll what to do with the information the system provides.
 def checking_window ():
     window = [True, False]
-    movement = random.choices(window, weights=[0.1,9.9],k=1)[0]
+    movement = random.choices(window, weights=[5, 5],k=1)[0]
     
     return movement
 # Counter for the number of times the cat has gone outside through the window
@@ -42,7 +55,7 @@ while open_bed:
         
         packege ={
         "sensorID": '04',
-        "cat_name": "",
+        "cat_name": get_cat_name(),
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "cat_state": cat_state,
         "bed_msg": msg,

@@ -12,6 +12,19 @@ import socket
 HOST = "127.0.0.1"
 PORT_SENSOR = 1001
 food_sensor_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+CATS_FILE = os.path.join(os.path.dirname(__file__), "..", "interface", "cats.json")
+
+
+def get_cat_name():
+    try:
+        with open(CATS_FILE, "r", encoding="utf-8") as f:
+            cats = json.load(f)
+            if cats:
+                return random.choice(list(cats.keys()))
+    except Exception:
+        pass
+    return ""
+
 # Dispencer state: True = open, False = closed
 open_dispencer = True
 # Cat state: True = comendo, False = inativo
@@ -24,7 +37,7 @@ cat_dict = {}
 #frequently, and, in advance, the author can controll what to do with the information the system provides.
 def checking_dispencer ():
     dispencer = [True, False]
-    movement = random.choices(dispencer, weights=[0.1,9.9],k=1)[0]
+    movement = random.choices(dispencer, weights=[5, 5],k=1)[0]
     
     return movement
 
@@ -37,7 +50,7 @@ while open_dispencer:
     msg = "Sem movimento detectado."    
     #Logic of definition of the cat state.
     if action:
-        msg = "movimento detectado."
+        msg = "O gatinho está comendo!"
                 
         if not cat_state:
             cat_state = True
@@ -48,7 +61,7 @@ while open_dispencer:
              
     packege = {
         "sensorID": '02',
-        "cat_name": "",
+        "cat_name": get_cat_name(),
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "cat_state": cat_state,
         "dispencer_msg": msg,

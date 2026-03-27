@@ -11,8 +11,20 @@ import socket
 HOST = "127.0.0.1"
 PORT_SENSOR = 1001 
 sensor_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+CATS_FILE = os.path.join(os.path.dirname(__file__), "..", "interface", "cats.json")
 
-# Window state: True = box clean, False = box dirty
+
+def get_cat_name():
+    try:
+        with open(CATS_FILE, "r", encoding="utf-8") as f:
+            cats = json.load(f)
+            if cats:
+                return random.choice(list(cats.keys()))
+    except Exception:
+        pass
+    return ""
+
+# Window state: True = clean box, False = completely dirty box
 box_state = True
 # Cat state: True = using the box, False = not using the box
 cat_state = False
@@ -22,11 +34,11 @@ cat_state = False
 #frequently, and, in advance, the author can controll what to do with the information the system provides.
 def checking_box ():
     box_state = [True, False]
-    movement = random.choices(box_state, weights=[0.1,9.9],k=1)[0]
+    movement = random.choices(box_state, weights=[5, 5],k=1)[0]
     
     return movement
-# Counter for the number of times the cat has gone outside through the window
-window_hangouts = 0
+# Counter for the number of times the cat has gone pooping or peeing in the box
+sandbox_usage = 0
 
 while box_state:
     action = checking_box()
@@ -35,18 +47,18 @@ while box_state:
         msg = "movimento detectado."        
         if not cat_state:
             cat_state = True
-            window_hangouts += 1
+            sandbox_usage += 1
             
         else:
             cat_state = False
         
         packege ={
-        "sensorID": '03',
-        "cat_name": "",
+        "sensorID": '05',
+        "cat_name": get_cat_name(),
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "cat_state": cat_state,
-        "window_msg": msg,
-        "total_hangouts": window_hangouts
+        "sandbox_msg": msg,
+        "total_usage": sandbox_usage
 
         }
         sensor_socket.sendto(json.dumps(packege).encode(), (HOST, PORT_SENSOR))

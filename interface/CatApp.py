@@ -9,18 +9,36 @@ Página única · Tela cheia · Pixel Art · Fotos
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
-import math, os, random
+import math, os, random, threading
 import socket
 import json
 
-HOST = "127.0.0.1"
-PORT_INTERFACE = 1005
-interface_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+SERVER_HOST = "127.0.0.1"
+SERVER_PORT = 1005
+CATS_FILE = os.path.join(os.path.dirname(__file__), "cats.json")
+
+
+def load_cats():
+    if not os.path.exists(CATS_FILE):
+        return {}
+    try:
+        with open(CATS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_cats(data):
+    try:
+        with open(CATS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"Erro ao salvar cats.json: {e}")
+
 
 def initialize_app():
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.bind((HOST, PORT_INTERFACE))
-    server_socket.listen()
+    # função legacy; agora usamos CatApp como cliente TCP conectado ao servidor
+    pass
     
 try:
     from PIL import Image, ImageTk, ImageDraw, ImageFont
@@ -638,12 +656,72 @@ class CatApp:
         # Mascote — persistente em toda a sessão
         self.mascot = MascotCat(self.root, self._content)
 
+        # Dados de gatos persistentes
+        global cat_data
+        cat_data = load_cats()
+
+        # Conexão com servidor via TCP para receber alertas
+        self.server_conn = None
+        self._connect_to_server()
+
         # Atalho teclado
         self.root.bind("<F11>", lambda e: self._toggle_fs())
         self.root.bind("<Escape>", lambda e: self._exit_fs())
 
         # Inicia na página principal
         self._push("🏠  início", self._page_main)
+
+    def _connect_to_server(self):
+        try:
+            self.server_conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.server_conn.settimeout(5.0)
+            self.server_conn.connect((SERVER_HOST, SERVER_PORT))
+            self.server_conn.settimeout(None)
+            threading.Thread(target=self._listen_server_alerts, daemon=True).start()
+            print(f"Conectado ao servidor em {SERVER_HOST}:{SERVER_PORT}")
+        except Exception as e:
+            self.server_conn = None
+            print(f"Falha ao conectar ao servidor: {e}")
+
+    def _send_command(self, cmd):
+        if self.server_conn:
+            try:
+                self.server_conn.send((json.dumps(cmd) + "\n").encode('utf-8'))
+            except Exception as e:
+                print(f"Erro ao enviar comando: {e}")
+
+    def _listen_server_alerts(self):
+        if not self.server_conn:
+            return
+        buffer = b""
+        try:
+            while True:
+                chunk = self.server_conn.recv(1024)
+                if not chunk:
+                    break
+                buffer += chunk
+                while b"\n" in buffer:
+                    line, buffer = buffer.split(b"\n", 1)
+                    try:
+                        alert = json.loads(line.decode('utf-8', errors='ignore'))
+                        self._show_server_alert(alert)
+                    except Exception as e:
+                        print(f"Erro ao decodificar alerta do servidor: {e}")
+        except Exception as e:
+            print(f"Conexão com servidor encerrada: {e}")
+        finally:
+            if self.server_conn:
+                self.server_conn.close()
+            self.server_conn = None
+
+    def _show_server_alert(self, alert):
+        msg = alert.get('message') or 'Alerta do servidor recebido.'
+        if alert.get('subtle'):
+            if hasattr(self, 'alert_log') and self.alert_log:
+                self.alert_log.insert(tk.END, f"{alert.get('timestamp', '')}: {msg}\n")
+                self.alert_log.see(tk.END)
+        else:
+            self.root.after(0, lambda: messagebox.showinfo('Alerta do servidor', msg))
 
     # ── Navegação ─────────────────────────────────────
     def _push(self, title, builder, *args):
@@ -939,6 +1017,7 @@ class CatApp:
                 "estado":   "dormindo",
                 "foto":     photo_path.get(),
             }
+            save_cats(cat_data)
             messagebox.showinfo("nyaa~", f"gatinho '{nome}' cadastrado com sucesso! 🐾")
             self._pop()
 
@@ -1172,6 +1251,7 @@ class CatApp:
                 "castrado": castrado_var.get(),
                 "foto":     photo_path.get(),
             })
+            save_cats(cat_data)
             messagebox.showinfo("nyaa~", f"gatinho '{nome}' atualizado! ♡")
             self._pop()
 
@@ -1224,6 +1304,7 @@ class CatApp:
             if messagebox.askyesno("confirmar",
                                    f"tem certeza que deseja excluir '{nome}'?\n(｡•́︿•̀｡)"):
                 del cat_data[nome]
+                save_cats(cat_data)
                 _photo_cache.clear()
                 messagebox.showinfo("feito", f"'{nome}' foi removido do sistema.")
                 self._pop()
@@ -1243,6 +1324,9 @@ class CatApp:
 
         main = tk.Frame(cf, bg=BG)
         main.pack(fill="both", expand=True)
+
+        self.alert_log = tk.Text(cf, height=8, width=80, bg=WHITE, fg=TEXT, font=FS)
+        self.alert_log.pack(side="bottom", fill="x", padx=10, pady=10)
 
         # ── Painel esquerdo (controles) ─────────────
         left = tk.Frame(main, bg=LAVENDER, width=240)
@@ -1281,6 +1365,17 @@ class CatApp:
         # sprite preview no painel esquerdo
         spr_left = tk.Canvas(left, width=80, height=74, bg=LAVENDER, highlightthickness=0)
         spr_left.pack(pady=6)
+
+        # Botões para desbloquear/abrir
+        tk.Button(left, text="🍽 Desbloquear dispenser", 
+                  command=lambda: self._send_command({"command": "unblock_food", "cat": selected.get()}), 
+                  bg=PEACH, fg=TEXT, font=FB).pack(pady=4)
+        tk.Button(left, text="🚪 Abrir porta", 
+                  command=lambda: self._send_command({"command": "open_door", "cat": selected.get()}), 
+                  bg=MINT, fg=TEXT, font=FB).pack(pady=4)
+        tk.Button(left, text="🪟 Abrir janela", 
+                  command=lambda: self._send_command({"command": "open_window", "cat": selected.get()}), 
+                  bg=LAVENDER, fg=TEXT, font=FB).pack(pady=4)
 
         # ── Painel direito (animação + foto) ────────
         right = tk.Frame(main, bg=BG)
@@ -1389,6 +1484,7 @@ class CatApp:
             est = estado_var.get() or info.get("estado","dormindo")
             if nome in cat_data:
                 cat_data[nome]["estado"] = est
+                save_cats(cat_data)
             _state["photo_img"] = None  # forçar reload de foto
 
             # Atualiza sprite esquerdo
