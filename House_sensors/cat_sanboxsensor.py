@@ -3,6 +3,7 @@ import random
 #used for persistency of data 
 import json
 #used for creating a log file with the date and time of the events, and the state of the cat and the door.
+import os
 from datetime import datetime
 import time
 #used for communication between the sensor and the server
@@ -13,6 +14,8 @@ PORT_SENSOR = 1001
 sensor_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 CATS_FILE = os.path.join(os.path.dirname(__file__), "..", "interface", "cats.json")
 
+with open(CATS_FILE, "r", encoding="utf-8") as f:
+            cats = json.load(f)
 
 def get_cat_name():
     try:
@@ -34,8 +37,9 @@ cat_state = False
 #frequently, and, in advance, the author can controll what to do with the information the system provides.
 def checking_box ():
     box_state = [True, False]
-    movement = random.choices(box_state, weights=[5, 5],k=1)[0]
-    
+    movement = random.choices(box_state, weights=[0.0001, 0.9999],k=1)[0]
+    if cats.get(get_cat_name(),{}).get("filhote")==True:
+        movement = random.choices(box_state, weights=[0.001, 0.999],k=1)[0]
     return movement
 # Counter for the number of times the cat has gone pooping or peeing in the box
 sandbox_usage = 0

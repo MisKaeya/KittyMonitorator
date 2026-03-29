@@ -14,6 +14,8 @@ PORT_SENSOR = 1001
 sensor_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 CATS_FILE = os.path.join(os.path.dirname(__file__), "..", "interface", "cats.json")
 
+with open(CATS_FILE, "r", encoding="utf-8") as f:
+            cats = json.load(f)
 
 def get_cat_name():
     try:
@@ -30,19 +32,20 @@ open_bed = True
 # Cat state: True = sleeping, False = waken
 cat_state = False
 
-#This function uses random.choices to simulate the window being open or closed, with a higher probability 
-#of being closed (9.5) than open (0.5), so that the "special" event of the cat going outside happens less
+#This function uses random.choices to simulate the bed being stepped on or not, with a higher probability 
+#of not being stepped on, so that the "special" event of the cat going to a nap happens less
 #frequently, and, in advance, the author can controll what to do with the information the system provides.
-def checking_window ():
-    window = [True, False]
-    movement = random.choices(window, weights=[5, 5],k=1)[0]
-    
+def checking_bed ():
+    bed = [True, False]
+    movement = random.choices(bed, weights=[0.0001, 0.9999],k=1)[0]
+    if cats.get(get_cat_name(),{}).get("castrado")==True:
+        movement = random.choices(bed, weights=[0.001, 0.999],k=1)[0]
     return movement
 # Counter for the number of times the cat has gone outside through the window
 bed_naps = 0
 
 while open_bed:
-    action = checking_window()
+    action = checking_bed()
     msg = "Sem peso detectado."    
     if action:
         msg = "peso detectado."        
