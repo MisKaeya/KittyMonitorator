@@ -37,9 +37,9 @@ cat_state = False
 #frequently, and, in advance, the author can controll what to do with the information the system provides.
 def checking_bed ():
     bed = [True, False]
-    movement = random.choices(bed, weights=[0.0001, 0.9999],k=1)[0]
+    movement = random.choices(bed, weights=[0.001, 0.999],k=1)[0]
     if cats.get(get_cat_name(),{}).get("castrado")==True:
-        movement = random.choices(bed, weights=[0.001, 0.999],k=1)[0]
+        movement = random.choices(bed, weights=[0.01, 0.99],k=1)[0]
     return movement
 # Counter for the number of times the cat has gone outside through the window
 bed_naps = 0

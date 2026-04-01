@@ -123,6 +123,9 @@ def _init_cat(cat_name: str):
         "bed_count":     0,
         "sandbox_count": 0,
 
+        # flag de exclusão mútua: enquanto True, sensores de porta/janela/comida são ignorados
+        "bed_occupied": False,
+
         # bloqueios (porta, janela e comida podem ser bloqueados)
         "door_blocked":    False,
         "window_blocked":  False,
@@ -340,7 +343,15 @@ def initialize_server():
 
             s = cat_states[cat]   # atalho
 
-            # ── PORTA ────────────────────────────────────────────────────
+            # ── LÓGICA DE SONO ────────────────────────────────────────────
+            # Se o sensor de cama está ativo (gato dormindo), eventos dos
+            # outros sensores são impossíveis fisicamente. Qualquer leitura
+            # positiva de porta/janela/comida é ruído — ignoramos.
+            # A cama (04) e a caixinha (05) são os únicos que sempre processam.
+            gato_dormindo = s["bed_occupied"]
+            if gato_dormindo and sid in ("01", "02", "03"):
+                # descarta silenciosamente
+                continue
             if sid == "01":
                 # Só age na transição False→True (o gato acabou de sair)
                 if is_new_event(cat, "door", cat_state):
@@ -357,6 +368,7 @@ def initialize_server():
                         resp = atuator_conn.call("door", {"count": s["door_count"], "cat_name": cat})
 
                         if resp.get("message"):
+                            resp["estado"] = "aventureiro"
                             send_interface_alert(resp)
 
                         if resp.get("action") == "block_door":
@@ -384,6 +396,7 @@ def initialize_server():
                         resp = atuator_conn.call("window", {"count": s["window_count"], "cat_name": cat})
 
                         if resp.get("message"):
+                            resp["estado"] = "aventureiro"
                             send_interface_alert(resp)
 
                         if resp.get("action") == "block_window":
@@ -411,6 +424,7 @@ def initialize_server():
                         resp = atuator_conn.call("food", {"count": s["food_count"], "cat_name": cat})
 
                         if resp.get("message"):
+                            resp["estado"] = "gordo" if resp.get("action") == "block_dispenser" else "comendo"
                             send_interface_alert(resp)
 
                         if resp.get("action") == "block_dispenser":
@@ -425,24 +439,44 @@ def initialize_server():
 
             # ── CAMA ─────────────────────────────────────────────────────
             elif sid == "04":
-                # Cada True é uma soneca (o sensor já alterna True/False)
+                # Captura o estado anterior ANTES de is_new_event alterar prev_bed.
+                # Isso permite detectar as transições de entrada e saída da cama.
+                prev_bed_was = s.get("prev_bed")
+
                 if is_new_event(cat, "bed", cat_state):
                     s["bed_count"] += 1
                     update_cat_stats(cat, "bed")
                     resp = atuator_conn.call("bed", {"count": s["bed_count"], "cat_name": cat})
-
                     if resp.get("message"):
+                        resp["estado"] = "dormindo"
                         send_interface_alert(resp)
-
-                    # Após aviso confirmado pelo dono (ok_bed), o contador
-                    # é zerado pelo handle_command. O atuador sinaliza com
-                    # reset_count=True para que o server saiba que deve aguardar.
                     if resp.get("reset_count"):
                         s["bed_count"] = 0
+
+                # Transição False/None → True: gato chegou na cama
+                if cat_state and not prev_bed_was:
+                    s["bed_occupied"] = True
+                    send_interface_alert({
+                        "type": "state_update", "sensor": "bed",
+                        "cat_name": cat, "estado": "dormindo",
+                        "timestamp": datetime.now().isoformat(),
+                    })
+
+                # Transição True → False: gato saiu da cama
+                elif not cat_state and prev_bed_was:
+                    s["bed_occupied"] = False
+                    # Não força um estado fixo: o próximo evento (comer, sair)
+                    # vai atualizar o estado naturalmente.
+                    send_interface_alert({
+                        "type": "state_update", "sensor": "bed",
+                        "cat_name": cat, "estado": "acordado",
+                        "timestamp": datetime.now().isoformat(),
+                    })
 
                 _append_log(get_log_path("bed_monitorator.json"), {
                     "cat_name": cat, "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "cat_state": cat_state, "total_naps": s["bed_count"],
+                    "bed_occupied": s["bed_occupied"],
                 })
 
             # ── CAIXINHA ─────────────────────────────────────────────────

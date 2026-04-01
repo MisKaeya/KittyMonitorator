@@ -37,9 +37,10 @@ cat_state = False
 #frequently, and, in advance, the author can controll what to do with the information the system provides.
 def checking_box ():
     box_state = [True, False]
-    movement = random.choices(box_state, weights=[0.0001, 0.9999],k=1)[0]
+    movement = random.choices(box_state, weights=[0.001, 0.999],k=1)[0]
     if cats.get(get_cat_name(),{}).get("filhote")==True:
-        movement = random.choices(box_state, weights=[0.001, 0.999],k=1)[0]
+        movement = random.choices(box_state, weights=[0.01, 0.99],k=1)[0]
+        
     return movement
 # Counter for the number of times the cat has gone pooping or peeing in the box
 sandbox_usage = 0

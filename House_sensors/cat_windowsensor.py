@@ -41,9 +41,9 @@ cat_state = False
 def checking_window ():
     
     window = [True, False]
-    movement = random.choices(window, weights=[0.0001, 0.9999],k=1)[0]
+    movement = random.choices(window, weights=[0.001, 0.999],k=1)[0]
     if cats.get(get_cat_name(),{}).get("castrado")==True:
-        movement = random.choices(window, weights=[0.000001, 0.999999],k=1)[0]
+        movement = random.choices(window, weights=[0.0001, 0.9999],k=1)[0]
     
     return movement
 # Counter for the number of times the cat has gone outside through the window

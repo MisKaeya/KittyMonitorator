@@ -502,15 +502,24 @@ class ToastManager:
         self._restack()
 
     def _restack(self):
-        """Reposiciona todos os toasts empilhados a partir do topo esquerdo."""
+        """
+        Reposiciona todos os toasts no canto superior DIREITO.
+        Calcula x a partir da largura real do content frame, o que funciona
+        em qualquer tamanho, inclusive fullscreen.
+        relx=1.0/anchor="ne" falha quando o widget ainda nao foi renderizado;
+        o calculo explicito de x e mais robusto.
+        """
+        self.root.update_idletasks()
+        content_w = self.content.winfo_width()
+        if content_w <= 1:
+            self.root.after(80, self._restack)
+            return
+        x = content_w - self.TOAST_W - self.X_OFFSET
         y = self.Y_OFFSET
         for f in self._toasts:
             try:
-                f.place(in_=self.content,
-                        x=self.X_OFFSET, y=y,
-                        width=self.TOAST_W)
+                f.place(in_=self.content, x=x, y=y, width=self.TOAST_W)
                 f.lift()
-                # calcula altura real após renderização
                 self.root.update_idletasks()
                 h = f.winfo_reqheight()
                 y += h + self.MARGIN
@@ -553,6 +562,12 @@ class CatApp:
 
         # Toast manager (global para toda a app)
         self.toast = ToastManager(self.root, self._content)
+
+        # Callback chamado quando _handle_alert atualiza o estado de um gato.
+        # A _page_sensor o registra para atualizar estado_lbl em tempo real.
+        # Outras páginas deixam None.
+        self._sensor_refresh_cb = None
+        self._sensor_event_hook  = None
 
         # Mascote
         self.mascot = MascotCat(self.root, self._content)
@@ -610,36 +625,60 @@ class CatApp:
 
     def _handle_alert(self, alert):
         """
-        Transforma alertas do servidor em toasts.
-        - subtle=True       → toast "info" (some sozinho)
-        - needs_owner=True  → toast "critical" (fica até o OK do dono)
-        - action presente   → toast "warn"
+        Processa mensagens do servidor. Dois tipos chegam:
+
+        1. Alertas normais (com "message"): viram toasts e opcionalmente
+           atualizam o estado do gato se o alert incluir o campo "estado".
+
+        2. state_update (sem "message"): só atualizam o estado do gato.
+           Enviados pelo server quando o gato chega/sai da cama ou quando
+           outros sensores disparam, sem necessidade de notificar o dono.
+
+        O campo "estado" no alert é definido pelo SERVER, não inferido aqui.
+        Isso evita falsos positivos (ex: "tentou sair" atualizar estado para
+        "aventureiro" mesmo com a porta bloqueada).
         """
-        msg = alert.get("message")
-        if not msg:
+        msg         = alert.get("message")
+        sensor      = alert.get("sensor", "")
+        cat         = alert.get("cat_name", "")
+        action      = alert.get("action")
+        subtle      = alert.get("subtle", False)
+        needs_owner = alert.get("needs_owner", False)
+        novo_estado = alert.get("estado")   # lido diretamente do server
+
+        # ── Atualiza estado do gato ────────────────────────────────
+        if cat and cat in cat_data and novo_estado:
+            # "acordado" não tem animação própria: volta para "dormindo"
+            # (próximo evento real — comer, sair — vai substituir)
+            estado_mapeado = "dormindo" if novo_estado == "acordado" else novo_estado
+            if cat_data[cat].get("estado") != estado_mapeado:
+                cat_data[cat]["estado"] = estado_mapeado
+                save_cats(cat_data)
+                if self._sensor_refresh_cb:
+                    self._sensor_refresh_cb(cat)
+
+        # ── state_update puro: sem toast ──────────────────────────
+        if alert.get("type") == "state_update":
             return
 
-        # Garante que msg seja string (sandbox retorna lista)
+        # ── Exibe toast ────────────────────────────────────────────
+        if not msg:
+            return
         if isinstance(msg, list):
             msg = " | ".join(msg)
 
-        needs_owner = alert.get("needs_owner", False)
-        action      = alert.get("action")
-        subtle      = alert.get("subtle", False)
-        cat         = alert.get("cat_name", "")
-
         def _on_ok():
-            # Quando o dono confirma um aviso crítico, envia reset ao servidor
-            sensor = alert.get("sensor", "")
             if sensor == "bed":
                 self._send_command({"command": "ok_bed", "cat": cat})
             elif sensor == "sandbox":
                 self._send_command({"command": "ok_sandbox", "cat": cat})
 
+        # Despacha evento para o feed do painel de sensores
+        if self._sensor_event_hook and sensor:
+            self._sensor_event_hook(alert)
+
         if needs_owner:
             self.toast.show(msg, kind="critical", on_ok=_on_ok)
-        elif subtle:
-            self.toast.show(msg, kind="info")
         elif action:
             self.toast.show(msg, kind="warn")
         else:
@@ -651,7 +690,10 @@ class CatApp:
 
     def _pop(self):
         if len(self._stack) > 1:
-            self._stack.pop(); self._render()
+            self._stack.pop()
+            self._sensor_refresh_cb = None
+            self._sensor_event_hook  = None   # limpa hooks ao sair da página de sensores
+            self._render()
 
     def _render(self):
         for w in self._content.winfo_children():
@@ -1035,144 +1077,375 @@ class CatApp:
 
         main = tk.Frame(cf, bg=BG); main.pack(fill="both", expand=True)
 
-        # ── Painel esquerdo ────────────────────────
-        left = tk.Frame(main, bg=LAVENDER, width=260)
+        # ══════════════════════════════════════════
+        # PAINEL ESQUERDO — gatinho + controles
+        # ══════════════════════════════════════════
+        left = tk.Frame(main, bg=LAVENDER, width=230)
         left.pack(side="left", fill="y")
         left.pack_propagate(False)
 
-        tk.Label(left, text="gatinho:", font=FB, bg=LAVENDER, fg=TEXT).pack(pady=(18,4))
+        tk.Label(left, text="gatinho:", font=FB, bg=LAVENDER, fg=TEXT).pack(pady=(14,3))
         selected = tk.StringVar(value=list(cat_data.keys())[0])
         cat_combo = ttk.Combobox(left, textvariable=selected,
                                  values=list(cat_data.keys()),
-                                 state="readonly", font=FM, width=16)
+                                 state="readonly", font=FM, width=14)
         cat_combo.pack(padx=10)
 
-        # FIX 5: estado como display-only (label), não radio button
-        tk.Label(left, text="estado atual:", font=FB, bg=LAVENDER, fg=TEXT).pack(pady=(16,4))
-        estado_lbl = tk.Label(left, text="dormindo 💤", font=FM, bg=LAVENDER, fg=TEXT,
-                              relief="flat", pady=4)
-        estado_lbl.pack(padx=10, fill="x")
+        tk.Label(left, text="estado:", font=FB, bg=LAVENDER, fg=TEXT).pack(pady=(10,2))
+        estado_lbl = tk.Label(left, text="💤 dormindo", font=FM, bg=LAVENDER, fg=TEXT)
+        estado_lbl.pack()
 
         info_lbl = tk.Label(left, text="", font=FS, bg=LAVENDER, fg=TEXT,
-                            wraplength=220, justify="left")
-        info_lbl.pack(pady=8, padx=10)
+                            wraplength=210, justify="left")
+        info_lbl.pack(pady=6, padx=8)
 
-        spr_left = tk.Canvas(left, width=80, height=74, bg=LAVENDER, highlightthickness=0)
-        spr_left.pack(pady=4)
+        spr_left = tk.Canvas(left, width=74, height=68, bg=LAVENDER, highlightthickness=0)
+        spr_left.pack()
 
-        # Separador
-        tk.Frame(left, bg=BORDER, height=2).pack(fill="x", pady=8, padx=10)
-
-        # FIX 3: Controles do dono — bloquear E desbloquear cada dispositivo
-        tk.Label(left, text="controle do dono:", font=FB, bg=LAVENDER, fg=TEXT).pack(pady=(4,6))
+        tk.Frame(left, bg=BORDER, height=2).pack(fill="x", pady=6, padx=8)
+        tk.Label(left, text="controle do dono:", font=FB, bg=LAVENDER, fg=TEXT).pack(pady=(2,4))
 
         def ctrl_btn(txt, bg_c, cmd):
-            b = tk.Button(left, text=txt, command=cmd, bg=bg_c, fg=TEXT,
-                          font=FS, relief="flat", cursor="hand2",
-                          activebackground=TEXT, activeforeground=WHITE,
-                          padx=6, pady=4)
-            b.pack(fill="x", padx=12, pady=2)
-            return b
+            tk.Button(left, text=txt, command=cmd, bg=bg_c, fg=TEXT,
+                      font=FS, relief="flat", cursor="hand2",
+                      activebackground=TEXT, activeforeground=WHITE,
+                      padx=4, pady=3).pack(fill="x", padx=10, pady=1)
 
-        # Dispenser
-        tk.Label(left, text="🍽 dispenser:", font=FS, bg=LAVENDER, fg=TEXT).pack(anchor="w", padx=12)
+        tk.Label(left, text="🍽 dispenser:", font=FS, bg=LAVENDER, fg=TEXT).pack(anchor="w", padx=10, pady=(4,0))
         ctrl_btn("🔓 desbloquear", MINT,
                  lambda: (self._send_command({"command":"unblock_food","cat":selected.get()}),
                           self.toast.show(f"Dispenser desbloqueado para {selected.get()}", kind="info")))
-        ctrl_btn("🔒 bloquear",    RED_BLOCK,
+        ctrl_btn("🔒 bloquear", RED_BLOCK,
                  lambda: (self._send_command({"command":"block_food","cat":selected.get()}),
                           self.toast.show(f"Dispenser bloqueado para {selected.get()}", kind="warn")))
 
-        # Porta
-        tk.Label(left, text="🚪 porta:", font=FS, bg=LAVENDER, fg=TEXT).pack(anchor="w", padx=12, pady=(6,0))
-        ctrl_btn("🔓 abrir",   MINT,
+        tk.Label(left, text="🚪 porta:", font=FS, bg=LAVENDER, fg=TEXT).pack(anchor="w", padx=10, pady=(4,0))
+        ctrl_btn("🔓 abrir", MINT,
                  lambda: (self._send_command({"command":"open_door","cat":selected.get()}),
                           self.toast.show(f"Porta aberta para {selected.get()}", kind="info")))
-        ctrl_btn("🔒 fechar",  RED_BLOCK,
+        ctrl_btn("🔒 fechar", RED_BLOCK,
                  lambda: (self._send_command({"command":"close_door","cat":selected.get()}),
                           self.toast.show(f"Porta fechada para {selected.get()}", kind="warn")))
 
-        # Janela
-        tk.Label(left, text="🪟 janela:", font=FS, bg=LAVENDER, fg=TEXT).pack(anchor="w", padx=12, pady=(6,0))
-        ctrl_btn("🔓 abrir",   MINT,
+        tk.Label(left, text="🪟 janela:", font=FS, bg=LAVENDER, fg=TEXT).pack(anchor="w", padx=10, pady=(4,0))
+        ctrl_btn("🔓 abrir", MINT,
                  lambda: (self._send_command({"command":"open_window","cat":selected.get()}),
                           self.toast.show(f"Janela aberta para {selected.get()}", kind="info")))
-        ctrl_btn("🔒 fechar",  RED_BLOCK,
+        ctrl_btn("🔒 fechar", RED_BLOCK,
                  lambda: (self._send_command({"command":"close_window","cat":selected.get()}),
                           self.toast.show(f"Janela fechada para {selected.get()}", kind="warn")))
 
-        # ── Painel direito (animação) ──────────────
-        right = tk.Frame(main, bg=BG); right.pack(side="right", fill="both", expand=True)
-        anim_cv = tk.Canvas(right, bg=CREAM, highlightthickness=3, highlightbackground=GOLD)
-        anim_cv.pack(fill="both", expand=True, padx=10, pady=10)
+        # ══════════════════════════════════════════
+        # PAINEL DIREITO — monitor de sensores
+        # ══════════════════════════════════════════
+        right = tk.Frame(main, bg=BG)
+        right.pack(side="right", fill="both", expand=True)
 
-        def _draw_bg(w, h):
-            anim_cv.delete("bg")
-            anim_cv.create_rectangle(0,0,w,int(h*0.62),fill=SOFT_BLUE,outline='',tags="bg")
-            anim_cv.create_rectangle(0,int(h*0.62),w,h,fill=DMINT,outline='',tags="bg")
-            for gx in range(0,w,14):
-                gy = int(h*0.62)
-                anim_cv.create_polygon(gx,gy,gx+5,gy-14,gx+10,gy,fill=MINT,outline='',tags="bg")
-            for nx,ny in [(80,30),(220,55),(380,20),(560,45),(420,60)]:
-                for dx in [0,22,-22]:
-                    anim_cv.create_oval(nx+dx-24,ny-14,nx+dx+24,ny+14,fill=WHITE,outline='',tags="bg")
+        # ── Configuração dos sensores ──────────────
+        SENSORS = [
+            ("door",    "🚪", "Porta",    PINK),
+            ("window",  "🪟", "Janela",   MINT),
+            ("food",    "🍽", "Comida",   PEACH),
+            ("bed",     "🛏", "Cama",     LAVENDER),
+            ("sandbox", "🏖", "Caixinha", YELLOW),
+        ]
+        # sensor_key → lista de eventos (max 50): {"ts", "cat", "msg", "action"}
+        sensor_events: dict[str, list] = {s[0]: [] for s in SENSORS}
 
-        anim_cv.bind("<Configure>", lambda e: _draw_bg(e.width, e.height))
+        active_sensor = tk.StringVar(value="door")
 
-        _state = {"frame":0, "job":None, "photo_img":None}
+        # ── Tabs de seleção de sensor ──────────────
+        tab_bar = tk.Frame(right, bg=BG)
+        tab_bar.pack(fill="x", padx=10, pady=(8,0))
 
+        _tab_btns = {}
+
+        def _select_sensor(key):
+            active_sensor.set(key)
+            for k, btn in _tab_btns.items():
+                cfg = next(s for s in SENSORS if s[0]==k)
+                btn.config(
+                    bg=cfg[3] if k==key else LGRAY,
+                    fg=TEXT   if k==key else DGRAY,
+                    relief="flat"
+                )
+            _refresh_feed()
+
+        for s_key, s_icon, s_name, s_col in SENSORS:
+            btn = tk.Button(
+                tab_bar, text=f"{s_icon}  {s_name}",
+                font=FB, relief="flat", cursor="hand2",
+                bg=LGRAY, fg=DGRAY, padx=10, pady=6,
+                command=lambda k=s_key: _select_sensor(k),
+                activebackground=TEXT, activeforeground=WHITE
+            )
+            btn.pack(side="left", padx=3)
+            _tab_btns[s_key] = btn
+
+        # Seleciona a primeira tab visualmente
+        _tab_btns["door"].config(bg=PINK, fg=TEXT)
+
+        # ── Indicador de atividade (canvas) ───────
+        indicator_frame = tk.Frame(right, bg=WHITE,
+                                   highlightthickness=2, highlightbackground=BORDER)
+        indicator_frame.pack(fill="x", padx=10, pady=6)
+
+        ind_cv = tk.Canvas(indicator_frame, bg=WHITE, height=110, highlightthickness=0)
+        ind_cv.pack(fill="x")
+
+        # Estado do indicador
+        _ind = {
+            "active": False,   # True quando acabou de receber evento
+            "pulse":  0,       # contador de frames do pulso
+            "last_cat": "",    # último gato que ativou
+            "last_msg": "",    # última mensagem
+            "job": None,
+        }
+
+        def _draw_indicator():
+            """
+            Desenha o indicador de atividade do sensor selecionado.
+            Quando ativo: círculo pulsante colorido + sprite do gato + nome.
+            Quando inativo: círculo cinza "aguardando...".
+            """
+            ind_cv.delete("all")
+            w = ind_cv.winfo_width() or 700
+            sensor_key = active_sensor.get()
+            sensor_cfg  = next(s for s in SENSORS if s[0]==sensor_key)
+            s_icon, s_name, s_col = sensor_cfg[1], sensor_cfg[2], sensor_cfg[3]
+
+            cx = w // 2
+
+            if _ind["active"]:
+                # Pulso expansivo
+                p = _ind["pulse"]
+                radius = 28 + int(math.sin(p * 0.25) * 10)
+                alpha_r = 28 + int(math.sin(p * 0.25 + 1) * 18)
+
+                # Anel externo (eco do pulso)
+                ind_cv.create_oval(cx-alpha_r, 55-alpha_r, cx+alpha_r, 55+alpha_r,
+                                   outline=s_col, width=3)
+                # Círculo principal
+                ind_cv.create_oval(cx-radius, 55-radius, cx+radius, 55+radius,
+                                   fill=s_col, outline=BORDER, width=2)
+                # Ícone do sensor no círculo
+                ind_cv.create_text(cx, 55, text=s_icon,
+                                   font=("Courier", 20, "bold"), fill=TEXT)
+
+                # Sprite do gato que ativou (à esquerda)
+                cat = _ind["last_cat"]
+                if cat and cat in cat_data:
+                    pelagem = cat_data[cat].get("pelagem", "cinza")
+                    sprite_x = max(10, cx - 160)
+                    _render_sprite(ind_cv, sprite_x, 20, SPR_SENTADO, pelagem, px=4, tag="ind")
+                    ind_cv.create_text(sprite_x + 28, 80, text=cat.title(),
+                                       font=FS, fill=TEXT, tags="ind")
+
+                # Nome do sensor e mensagem curta (à direita)
+                ind_cv.create_text(cx + 80, 42, text=f"{s_name} ativada!",
+                                   font=FM, fill=TEXT, anchor="w")
+                msg_short = _ind["last_msg"][:60] + ("…" if len(_ind["last_msg"]) > 60 else "")
+                ind_cv.create_text(cx + 80, 62, text=msg_short,
+                                   font=FS, fill=DGRAY, anchor="w", width=w - cx - 90)
+
+                _ind["pulse"] += 1
+                # Desativa o pulso após ~3 segundos (60 frames a 50ms)
+                if _ind["pulse"] > 60:
+                    _ind["active"] = False
+                    _ind["pulse"]  = 0
+            else:
+                # Estado ocioso
+                ind_cv.create_oval(cx-22, 33, cx+22, 77,
+                                   fill=LGRAY, outline=MGRAY, width=2)
+                ind_cv.create_text(cx, 55, text=s_icon,
+                                   font=("Courier", 18), fill=MGRAY)
+                ind_cv.create_text(cx + 34, 55, text=f"aguardando {s_name.lower()}…",
+                                   font=FS, fill=DGRAY, anchor="w")
+
+            _ind["job"] = ind_cv.after(50, _draw_indicator)
+
+        # ── Feed de eventos (lista scrollável) ────
+        feed_outer = tk.Frame(right, bg=BG)
+        feed_outer.pack(fill="both", expand=True, padx=10, pady=(0,8))
+
+        feed_header = tk.Frame(feed_outer, bg=LGRAY)
+        feed_header.pack(fill="x")
+        tk.Label(feed_header, text="histórico de atividade",
+                 font=FB, bg=LGRAY, fg=TEXT).pack(side="left", padx=10, pady=4)
+        tk.Button(feed_header, text="🗑 limpar", font=FS, bg=LGRAY, fg=DGRAY,
+                  relief="flat", cursor="hand2",
+                  command=lambda: (sensor_events[active_sensor.get()].clear(),
+                                   _refresh_feed())
+                  ).pack(side="right", padx=8)
+
+        feed_canvas = tk.Canvas(feed_outer, bg=WHITE, highlightthickness=0)
+        feed_scroll = tk.Scrollbar(feed_outer, orient="vertical",
+                                   command=feed_canvas.yview)
+        feed_canvas.configure(yscrollcommand=feed_scroll.set)
+        feed_scroll.pack(side="right", fill="y")
+        feed_canvas.pack(side="left", fill="both", expand=True)
+
+        feed_inner = tk.Frame(feed_canvas, bg=WHITE)
+        feed_win   = feed_canvas.create_window((0,0), window=feed_inner, anchor="nw")
+        feed_canvas.bind("<Configure>",
+                         lambda e: feed_canvas.itemconfig(feed_win, width=e.width))
+        feed_inner.bind("<Configure>",
+                        lambda e: feed_canvas.configure(
+                            scrollregion=feed_canvas.bbox("all")))
+        feed_canvas.bind_all("<MouseWheel>",
+                             lambda e: feed_canvas.yview_scroll(
+                                 -1*(e.delta//120), "units"))
+
+        # Mapa de ícones por ação
+        ACTION_ICON = {
+            "block_door":    ("🔒", RED_BLOCK),
+            "block_window":  ("🔒", RED_BLOCK),
+            "block_dispenser":("🔒", RED_BLOCK),
+            "reset_sandbox": ("🏥", PEACH),
+            "cat_mood_check":("😿", LAVENDER),
+            None:            ("●",  MINT),
+        }
+
+        def _refresh_feed():
+            """Reconstrói a lista de eventos do sensor selecionado."""
+            for w in feed_inner.winfo_children():
+                w.destroy()
+
+            events = sensor_events[active_sensor.get()]
+            if not events:
+                tk.Label(feed_inner, text="nenhum evento registrado ainda…",
+                         font=FS, bg=WHITE, fg=DGRAY).pack(pady=20)
+                return
+
+            # Mais recente primeiro
+            for ev in reversed(events):
+                row_bg = ev.get("row_bg", WHITE)
+                row = tk.Frame(feed_inner, bg=row_bg,
+                               highlightthickness=1,
+                               highlightbackground=LGRAY)
+                row.pack(fill="x", padx=4, pady=2)
+
+                # Ícone de ação
+                icon_txt, icon_col = ACTION_ICON.get(ev.get("action"), ACTION_ICON[None])
+                tk.Label(row, text=icon_txt, font=("Courier",13,"bold"),
+                         bg=row_bg, fg=icon_col, width=2).pack(side="left", padx=6, pady=4)
+
+                # Sprite do gato (mini, 3px)
+                cat = ev.get("cat","")
+                if cat and cat in cat_data:
+                    pelagem = cat_data[cat].get("pelagem","cinza")
+                    spr = tk.Canvas(row, width=45, height=42,
+                                    bg=row_bg, highlightthickness=0)
+                    spr.pack(side="left", padx=2)
+                    _render_sprite(spr, 0, 0, SPR_SENTADO, pelagem, px=3)
+
+                # Textos
+                txt_frame = tk.Frame(row, bg=row_bg)
+                txt_frame.pack(side="left", fill="x", expand=True, padx=4)
+
+                header_txt = f"{cat.title()}" if cat else "desconhecido"
+                if ev.get("action"):
+                    header_txt += f"  [{ev['action']}]"
+                tk.Label(txt_frame, text=header_txt,
+                         font=FB, bg=row_bg, fg=TEXT,
+                         anchor="w").pack(fill="x")
+
+                msg = ev.get("msg","")
+                if isinstance(msg, list): msg = " | ".join(msg)
+                if msg:
+                    tk.Label(txt_frame, text=msg, font=FS, bg=row_bg,
+                             fg=DGRAY, anchor="w", wraplength=380,
+                             justify="left").pack(fill="x")
+
+                # Timestamp (direita)
+                tk.Label(row, text=ev.get("ts",""), font=FS,
+                         bg=row_bg, fg=MGRAY).pack(side="right", padx=8)
+
+        _refresh_feed()   # inicia vazio
+
+        # ── Hook: recebe eventos do servidor ──────
+        def _on_sensor_alert(alert):
+            """
+            Chamado pelo _handle_alert quando chega alerta do servidor.
+            Registra o evento no sensor correspondente e atualiza a UI.
+            """
+            sensor_key  = alert.get("sensor", "")
+            if sensor_key not in sensor_events:
+                return
+
+            cat    = alert.get("cat_name", "")
+            msg    = alert.get("message", "")
+            action = alert.get("action")
+            ts     = alert.get("timestamp","")
+            if ts:
+                try:
+                    ts = ts[11:19]   # extrai HH:MM:SS do ISO timestamp
+                except Exception:
+                    pass
+
+            # Cor de fundo da linha conforme gravidade
+            if action in ("block_door","block_window","block_dispenser"):
+                row_bg = "#FFE0E0"   # vermelho claro
+            elif action in ("reset_sandbox","cat_mood_check"):
+                row_bg = "#FFF0D0"   # laranja claro
+            else:
+                row_bg = WHITE
+
+            sensor_events[sensor_key].append({
+                "ts": ts, "cat": cat, "msg": msg,
+                "action": action, "row_bg": row_bg,
+            })
+            # Mantém no máximo 50 eventos por sensor
+            if len(sensor_events[sensor_key]) > 50:
+                sensor_events[sensor_key].pop(0)
+
+            # Atualiza indicador se este sensor estiver selecionado
+            if sensor_key == active_sensor.get():
+                _ind["active"]   = True
+                _ind["pulse"]    = 0
+                _ind["last_cat"] = cat
+                _ind["last_msg"] = msg if isinstance(msg, str) else " | ".join(msg)
+                _refresh_feed()
+
+        # ── Atualiza info do gato selecionado ─────
         ESTADOS_ICON = {
-            "dormindo": "💤 dormindo",
-            "comendo":  "🍽 comendo",
-            "gordo":    "😺 ficou gordo",
+            "dormindo":    "💤 dormindo",
+            "comendo":     "🍽 comendo",
+            "gordo":       "😺 ficou gordo",
             "aventureiro": "🗺 aventureiro",
         }
 
-        DRAWERS = {
-            "dormindo":    draw_cat_dormindo,
-            "comendo":     draw_cat_comendo,
-            "gordo":       draw_cat_gordo,
-            "aventureiro": draw_cat_aventureiro,
-        }
-
-        def _tick():
-            _state["frame"] += 1; f = _state["frame"]
-            nome  = selected.get(); info = cat_data.get(nome,{})
-            estado   = info.get("estado","dormindo")
-            pelagem  = info.get("pelagem","cinza")
-            w = anim_cv.winfo_width() or 600; h = anim_cv.winfo_height() or 400
-            DRAWERS.get(estado, draw_cat_dormindo)(anim_cv, w//2, int(h*0.5), f, pelagem)
-            _state["job"] = anim_cv.after(50, _tick)
-
-        def _on_change(*_):
-            nome = selected.get(); info = cat_data.get(nome,{})
-            estado = info.get("estado","dormindo")
-            estado_lbl.config(text=ESTADOS_ICON.get(estado, estado))
+        def _on_cat_change(*_):
+            nome = selected.get()
+            info = cat_data.get(nome, {})
+            estado_lbl.config(text=ESTADOS_ICON.get(info.get("estado","dormindo"),
+                                                     info.get("estado","dormindo")))
             spr_left.delete("all")
-            _render_sprite(spr_left,2,2,SPR_SENTADO,info.get("pelagem","cinza"),px=5,tag="s")
+            _render_sprite(spr_left, 2, 2, SPR_SENTADO, info.get("pelagem","cinza"), px=5)
             unit = "meses" if info.get("filhote") else "anos"
-            extras = []
-            if info.get("filhote"):  extras.append("filhote")
-            if info.get("castrado"): extras.append("castrado")
+            extras = [x for x in ["filhote" if info.get("filhote") else "",
+                                   "castrado" if info.get("castrado") else ""] if x]
             info_lbl.config(
                 text=f"{nome.title()}\nraça: {info.get('raça','-')}\n"
                      f"peso: {info.get('peso','-')} kg\n"
-                     f"idade: {info.get('idade','-')} {unit}\n"
-                     + ("  •  ".join(extras) if extras else ""))
-            _state["photo_img"] = None
+                     f"idade: {info.get('idade','-')} {unit}"
+                     + (f"\n{'  •  '.join(extras)}" if extras else ""))
             self.mascot.fur = info.get("pelagem","cinza")
 
-        cat_combo.bind("<<ComboboxSelected>>", _on_change)
-        _on_change()
+        cat_combo.bind("<<ComboboxSelected>>", _on_cat_change)
+        _on_cat_change()
 
-        def _start():
-            if _state["job"]:
-                try: anim_cv.after_cancel(_state["job"])
-                except: pass
-            _tick()
+        # Registra callbacks globais
+        def _refresh_from_alert(cat_name):
+            if cat_name == selected.get():
+                _on_cat_change()
+        self._sensor_refresh_cb  = _refresh_from_alert
+        self._sensor_event_hook  = _on_sensor_alert   # novo hook de eventos
 
-        cf.after(100, _start)
-        anim_cv.bind("<Destroy>", lambda e: anim_cv.after_cancel(_state["job"]) if _state["job"] else None)
+        # Inicia o indicador
+        cf.after(120, _draw_indicator)
+        ind_cv.bind("<Destroy>", lambda e: (
+            ind_cv.after_cancel(_ind["job"]) if _ind.get("job") else None))
 
     def run(self):
         self.root.mainloop()
