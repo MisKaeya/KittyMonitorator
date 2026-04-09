@@ -1,131 +1,149 @@
+# docker-compose.yml
 version: '3.8'
+
+# ==============================================
+# COMO USAR:
+#   PC 1: docker compose --profile pc_1 up
+#   PC 2: docker compose --profile pc_2 up
+#   PC 3: docker compose --profile pc_3 up
+#   PC 4: docker compose --profile pc_4 up
+#
+# Copie o .env.example para .env e preencha os IPs reais
+# ==============================================
 
 services:
   # ==========================================
-  # MAIN SERVER
+  # MAIN SERVER — roda no PC 4
   # ==========================================
   server:
     build:
       context: .
       dockerfile: dockerFiles/Dockerfile.server
     container_name: kitty_server
+    profiles: ["pc_4"]
     ports:
       - "2005:2005"
     environment:
-      - ATUATOR_ACCESS_HOST=kitty_atuador_access
+      - ATUATOR_ACCESS_HOST=${PC_3_IP}
       - ATUATOR_ACCESS_PORT=2000
-      - ATUATOR_WELFARE_HOST=kitty_atuador_welfare
+      - ATUATOR_WELFARE_HOST=${PC_3_IP}
       - ATUATOR_WELFARE_PORT=2003
     volumes:
       - ./interface:/app/interface
-    depends_on:
-      - atuador_access
-      - atuador_welfare
     networks:
       - kitty_network
 
   # ==========================================
-  # ACCESS ACTUATOR (door, window, food)
+  # ACCESS ACTUATOR — roda no PC 3
   # ==========================================
   atuador_access:
     build:
       context: .
       dockerfile: dockerFiles/Dockerfile.atuador_access
     container_name: kitty_atuador_access
+    profiles: ["pc_3"]
+    ports:
+      - "2000:2000"
     networks:
       - kitty_network
 
   # ==========================================
-  # WELFARE ACTUATOR (bed, sandbox)
+  # WELFARE ACTUATOR — roda no PC 3
   # ==========================================
   atuador_welfare:
     build:
       context: .
       dockerfile: dockerFiles/Dockerfile.atuador_welfare
     container_name: kitty_atuador_welfare
+    profiles: ["pc_3"]
+    ports:
+      - "2003:2003"
     networks:
       - kitty_network
 
   # ==========================================
-  # HOUSE SENSORS
+  # HOUSE SENSORS — PC 1
   # ==========================================
   sensor_bed:
     build:
       context: .
       dockerfile: dockerFiles/Dockerfile.sensor
     container_name: kitty_sensor_bed
+    profiles: ["pc_1"]
     command: python House_sensors/cat_bedsensor.py
     environment:
-      - SERVER_HOST=kitty_server
-    depends_on:
-      - server
-    networks:
-      - kitty_network
+      - SERVER_HOST=${PC_4_IP}
+      - SERVER_PORT=2005
     volumes:
       - ./interface:/app/interface
-
-  sensor_door:
-    build:
-      context: .
-      dockerfile: dockerFiles/Dockerfile.sensor
-    container_name: kitty_sensor_door
-    command: python House_sensors/cat_doorsensor.py
-    environment:
-      - SERVER_HOST=kitty_server
-    depends_on:
-      - server
     networks:
       - kitty_network
-    volumes:
-      - ./interface:/app/interface
-
-  sensor_food:
-    build:
-      context: .
-      dockerfile: dockerFiles/Dockerfile.sensor
-    container_name: kitty_sensor_food
-    command: python House_sensors/cat_foodsensor.py
-    environment:
-      - SERVER_HOST=kitty_server
-    depends_on:
-      - server
-    networks:
-      - kitty_network
-    volumes:
-      - ./interface:/app/interface
 
   sensor_sandbox:
     build:
       context: .
       dockerfile: dockerFiles/Dockerfile.sensor
     container_name: kitty_sensor_sandbox
+    profiles: ["pc_1"]
     command: python House_sensors/cat_sanboxsensor.py
     environment:
-      - SERVER_HOST=kitty_server
-    depends_on:
-      - server
-    networks:
-      - kitty_network
+      - SERVER_HOST=${PC_4_IP}
+      - SERVER_PORT=2005
     volumes:
       - ./interface:/app/interface
+    networks:
+      - kitty_network
+
+  # ==========================================
+  # HOUSE SENSORS — PC 2
+  # ==========================================
+  sensor_door:
+    build:
+      context: .
+      dockerfile: dockerFiles/Dockerfile.sensor
+    container_name: kitty_sensor_door
+    profiles: ["pc_2"]
+    command: python House_sensors/cat_doorsensor.py
+    environment:
+      - SERVER_HOST=${PC_4_IP}
+      - SERVER_PORT=2005
+    volumes:
+      - ./interface:/app/interface
+    networks:
+      - kitty_network
+
+  sensor_food:
+    build:
+      context: .
+      dockerfile: dockerFiles/Dockerfile.sensor
+    container_name: kitty_sensor_food
+    profiles: ["pc_2"]
+    command: python House_sensors/cat_foodsensor.py
+    environment:
+      - SERVER_HOST=${PC_4_IP}
+      - SERVER_PORT=2005
+    volumes:
+      - ./interface:/app/interface
+    networks:
+      - kitty_network
 
   sensor_window:
     build:
       context: .
       dockerfile: dockerFiles/Dockerfile.sensor
     container_name: kitty_sensor_window
+    profiles: ["pc_2"]
     command: python House_sensors/cat_windowsensor.py
     environment:
-      - SERVER_HOST=kitty_server
-    depends_on:
-      - server
-    networks:
-      - kitty_network
+      - SERVER_HOST=${PC_4_IP}
+      - SERVER_PORT=2005
     volumes:
       - ./interface:/app/interface
+    networks:
+      - kitty_network
 
 # ==========================================
-# INTERNAL CONTAINER NETWORK
+# REDE LOCAL DO CONTAINER (mesmo PC)
 # ==========================================
 networks:
   kitty_network:
