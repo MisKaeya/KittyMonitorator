@@ -1,0 +1,23 @@
+[
+  {
+    "cat_name": "apollo",
+    "timestamp": "2026-04-05 12:07:57",
+    "cat_state": true,
+    "total_exits": 1,
+    "blocked": false
+  },
+  {
+    "cat_name": "apollo",
+    "timestamp": "2026-04-05 12:08:56",
+    "cat_state": false,
+    "total_exits": 1,
+    "blocked": false
+  },
+  {
+    "cat_name": "pipo",
+    "timestamp": "2026-04-05 12:09:14",
+    "cat_state": true,
+    "total_exits": 1,
+    "blocked": false
+  }
+]

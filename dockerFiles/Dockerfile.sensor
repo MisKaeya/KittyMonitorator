@@ -1,0 +1,9 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Copia a pasta de sensores
+COPY House_sensors/ ./House_sensors/
+
+# O CMD será sobrescrito no docker-compose para cada sensor específico
+CMD ["python", "House_sensors/cat_bedsensor.py"]

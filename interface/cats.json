@@ -18,5 +18,35 @@
     "castrado": false,
     "estado": "dormindo",
     "foto": ""
+  },
+  "elis": {
+    "raça": "Siamês",
+    "pelagem": "branco",
+    "peso": 5.0,
+    "idade": 5,
+    "filhote": false,
+    "castrado": true,
+    "estado": "aventureiro",
+    "foto": ""
+  },
+  "zeza": {
+    "raça": "Puro-sangue",
+    "pelagem": "rajado",
+    "peso": 6.0,
+    "idade": 4,
+    "filhote": false,
+    "castrado": true,
+    "estado": "aventureiro",
+    "foto": ""
+  },
+  "guga": {
+    "raça": "Paraibano",
+    "pelagem": "siamês",
+    "peso": 6.0,
+    "idade": 7,
+    "filhote": false,
+    "castrado": false,
+    "estado": "dormindo",
+    "foto": ""
   }
 }

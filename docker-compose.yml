@@ -1,0 +1,132 @@
+version: '3.8'
+
+services:
+  # ==========================================
+  # MAIN SERVER
+  # ==========================================
+  server:
+    build:
+      context: .
+      dockerfile: dockerFiles/Dockerfile.server
+    container_name: kitty_server
+    ports:
+      - "2005:2005"
+    environment:
+      - ATUATOR_ACCESS_HOST=kitty_atuador_access
+      - ATUATOR_ACCESS_PORT=2000
+      - ATUATOR_WELFARE_HOST=kitty_atuador_welfare
+      - ATUATOR_WELFARE_PORT=2003
+    volumes:
+      - ./interface:/app/interface
+    depends_on:
+      - atuador_access
+      - atuador_welfare
+    networks:
+      - kitty_network
+
+  # ==========================================
+  # ACCESS ACTUATOR (door, window, food)
+  # ==========================================
+  atuador_access:
+    build:
+      context: .
+      dockerfile: dockerFiles/Dockerfile.atuador_access
+    container_name: kitty_atuador_access
+    networks:
+      - kitty_network
+
+  # ==========================================
+  # WELFARE ACTUATOR (bed, sandbox)
+  # ==========================================
+  atuador_welfare:
+    build:
+      context: .
+      dockerfile: dockerFiles/Dockerfile.atuador_welfare
+    container_name: kitty_atuador_welfare
+    networks:
+      - kitty_network
+
+  # ==========================================
+  # HOUSE SENSORS
+  # ==========================================
+  sensor_bed:
+    build:
+      context: .
+      dockerfile: dockerFiles/Dockerfile.sensor
+    container_name: kitty_sensor_bed
+    command: python House_sensors/cat_bedsensor.py
+    environment:
+      - SERVER_HOST=kitty_server
+    depends_on:
+      - server
+    networks:
+      - kitty_network
+    volumes:
+      - ./interface:/app/interface
+
+  sensor_door:
+    build:
+      context: .
+      dockerfile: dockerFiles/Dockerfile.sensor
+    container_name: kitty_sensor_door
+    command: python House_sensors/cat_doorsensor.py
+    environment:
+      - SERVER_HOST=kitty_server
+    depends_on:
+      - server
+    networks:
+      - kitty_network
+    volumes:
+      - ./interface:/app/interface
+
+  sensor_food:
+    build:
+      context: .
+      dockerfile: dockerFiles/Dockerfile.sensor
+    container_name: kitty_sensor_food
+    command: python House_sensors/cat_foodsensor.py
+    environment:
+      - SERVER_HOST=kitty_server
+    depends_on:
+      - server
+    networks:
+      - kitty_network
+    volumes:
+      - ./interface:/app/interface
+
+  sensor_sandbox:
+    build:
+      context: .
+      dockerfile: dockerFiles/Dockerfile.sensor
+    container_name: kitty_sensor_sandbox
+    command: python House_sensors/cat_sanboxsensor.py
+    environment:
+      - SERVER_HOST=kitty_server
+    depends_on:
+      - server
+    networks:
+      - kitty_network
+    volumes:
+      - ./interface:/app/interface
+
+  sensor_window:
+    build:
+      context: .
+      dockerfile: dockerFiles/Dockerfile.sensor
+    container_name: kitty_sensor_window
+    command: python House_sensors/cat_windowsensor.py
+    environment:
+      - SERVER_HOST=kitty_server
+    depends_on:
+      - server
+    networks:
+      - kitty_network
+    volumes:
+      - ./interface:/app/interface
+
+# ==========================================
+# INTERNAL CONTAINER NETWORK
+# ==========================================
+networks:
+  kitty_network:
+    driver: bridge

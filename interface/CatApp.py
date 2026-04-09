@@ -12,7 +12,7 @@ import math, os, random, threading, shutil
 import socket, json, time
 
 SERVER_HOST = "127.0.0.1"
-SERVER_PORT = 1005
+SERVER_PORT = 2005
 CATS_FILE   = os.path.join(os.path.dirname(__file__), "cats.json")
 PHOTOS_DIR  = os.path.join(os.path.dirname(__file__), "photos")
 os.makedirs(PHOTOS_DIR, exist_ok=True)

@@ -9,8 +9,8 @@ import time
 #used for communication between the sensor and the server
 import socket
 
-HOST = "127.0.0.1"
-PORT_SENSOR = 1001 
+HOST = os.environ.get("SERVER_HOST", "kitty_server")
+PORT_SENSOR = 2001 
 sensor_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 CATS_FILE = os.path.join(os.path.dirname(__file__), "..", "interface", "cats.json")
 # Load cats data from the JSON file
@@ -41,7 +41,7 @@ cat_state = False
 def checking_window ():
     
     window = [True, False]
-    movement = random.choices(window, weights=[0.001, 0.999],k=1)[0]
+    movement = random.choices(window, weights=[0.0005, 0.9995],k=1)[0]
     if cats.get(get_cat_name(),{}).get("castrado")==True:
         movement = random.choices(window, weights=[0.0001, 0.9999],k=1)[0]
     
@@ -77,4 +77,4 @@ while open_window:
    
     print(msg) 
     # Requested time between each check, in seconds. Adjust as needed.
-    time.sleep(0.001)
+    time.sleep(0.1)

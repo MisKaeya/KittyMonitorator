@@ -1,0 +1,16 @@
+{
+  "apollo": {
+    "door": 22,
+    "window": 0,
+    "food": 0,
+    "sandbox": 0,
+    "bed": 0
+  },
+  "pipo": {
+    "door": 22,
+    "window": 0,
+    "food": 0,
+    "sandbox": 0,
+    "bed": 0
+  }
+}

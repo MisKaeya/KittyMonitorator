@@ -9,8 +9,8 @@ from datetime import datetime
 import time
 import socket
 
-HOST = "127.0.0.1"
-PORT_SENSOR = 1001
+HOST = os.environ.get("SERVER_HOST", "kitty_server")
+PORT_SENSOR = 2001
 food_sensor_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 CATS_FILE = os.path.join(os.path.dirname(__file__), "..", "interface", "cats.json")
 
@@ -39,7 +39,7 @@ cat_dict = {}
 #frequently, and, in advance, the author can controll what to do with the information the system provides.
 def checking_dispencer ():
     dispencer = [True, False]
-    movement = random.choices(dispencer, weights=[0.001, 0.999],k=1)[0]
+    movement = random.choices(dispencer, weights=[0.0001, 0.9999],k=1)[0]
     if cats.get(get_cat_name(),{}).get("castrado")==True:
         movement = random.choices(dispencer, weights=[0.01, 0.99],k=1)[0]
     return movement
@@ -75,4 +75,4 @@ while open_dispencer:
    
     print(msg) 
     # Requested time between each check, in seconds. Adjust as needed.
-    time.sleep(0.001)
+    time.sleep(0.1)
